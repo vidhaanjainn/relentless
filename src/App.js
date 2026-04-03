@@ -31,8 +31,6 @@ function haptic(type = 'light') {
   navigator.vibrate(patterns[type] || patterns.light);
 }
 
-
-
 function getGreeting() {
   const h = new Date().getHours();
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
@@ -131,6 +129,8 @@ export default function App() {
     callCount,
     estimatedCostRs,
     wins,
+    mitDone,        // ← NEW
+    toggleMIT,      // ← NEW
     saveTasks,
     toggleBlock,
     isBlockDone,
@@ -142,7 +142,7 @@ export default function App() {
   } = useStorage();
 
   const [tab,         setTab]         = useState('home');
-  const [sheet,       setSheet]       = useState(null);   // mindset sheet type
+  const [sheet,       setSheet]       = useState(null);
   const [burst,       setBurst]       = useState(false);
   const [toast,       setToast]       = useState({ msg: '', ok: false });
   const [showSettings, setShowSettings] = useState(false);
@@ -167,27 +167,39 @@ export default function App() {
   const celebrate = useCallback(() => {
     setBurst(true);
     setTimeout(() => setBurst(false), 500);
-    haptic([10, 50, 10]); // double tap feel
+    haptic([10, 50, 10]);
   }, [haptic]);
+
+  // ── MIT tick ─────────────────────────────────────────────────
+  const handleToggleMIT = useCallback(() => {
+    const nowDone = !mitDone;
+    toggleMIT();
+    if (nowDone) {
+      celebrate();
+      bumpStreak('mit');
+      showToast('MIT done. That\'s the one that matters. ✦', true);
+    } else {
+      dropStreak('mit');
+    }
+  }, [mitDone, toggleMIT, celebrate, bumpStreak, dropStreak, showToast]);
 
   // ── Block tick ───────────────────────────────────────────────
   const handleTick = useCallback((blockId, streakType) => {
-    const nowDone = !isBlockDone(blockId); // true = ticking ON, false = unticking
+    const nowDone = !isBlockDone(blockId);
     toggleBlock(blockId);
     if (nowDone) {
       celebrate();
       if (streakType === 'rec') {
-        bumpStreak('rec'); // idempotent — only counts once per day
+        bumpStreak('rec');
         markWin('rec');
         showToast('Recording logged 🎬', true);
       }
       if (streakType === 'gym') {
-        bumpStreak('gym'); // idempotent — only counts once per day
+        bumpStreak('gym');
         markWin('gym');
         showToast('Gym logged 💪', true);
       }
     } else {
-      // Unticking — reverse the streak if it was counted today
       if (streakType === 'rec') dropStreak('rec');
       if (streakType === 'gym') dropStreak('gym');
     }
@@ -203,17 +215,11 @@ export default function App() {
   // ── Scheduled pressure checks ────────────────────────────────
   useEffect(() => {
     const now = new Date();
-    const h = now.getHours(), m = now.getMinutes(), day = now.getDay();
-    // 4:50 PM gym nudge
-    if (h === 16 && m >= 50) setSheet('gym');
-    // 2:30 PM camera nudge on content days
-    if (h === 14 && m >= 30 && m < 45 && [1, 3, 5].includes(day)) {
-      showToast('Camera setup time — recording window opens at 3 PM 🎬');
-    }
-    // Sunday sport nudge
-    if (day === 0 && h >= 10) showToast('Sunday! Go play Pickleball or Cricket 🏏');
-    // Night dump
-    if (h === 21 && m < 5)          showToast("Night dump time — 3 minutes. What's tomorrow's job?");
+    const h = now.getHours();
+    const m = now.getMinutes();
+    if (h === 14 && m >= 30 && m < 35) showToast('Camera setup time. 3 PM window opens in 30 min.');
+    if (h === 16 && m >= 50 && m < 55) setSheet('gym');
+    if (h === 21 && m >= 0  && m < 5)  showToast('Night dump time. What needs to happen tomorrow?');
     if (h === 22 && m >= 30 && m < 35) showToast('Still no dump. Quick — what needs to happen tomorrow?');
   }, []); // eslint-disable-line
 
@@ -236,6 +242,7 @@ export default function App() {
     wins.prep && 'Script prepared',
     wins.rec  && 'Reel recorded',
     wins.gym  && 'Gym done',
+    mitDone   && 'MIT completed ✦',   // ← NEW
   ].filter(Boolean);
 
   // ═══════════════════════════════
@@ -323,6 +330,8 @@ export default function App() {
                 microStart={microStart}
                 onStartFocus={() => setTab('focus')}
                 onSheet={setSheet}
+                mitDone={mitDone}
+                onToggleMIT={handleToggleMIT}
               />
 
               {/* Mindset preview */}
@@ -364,7 +373,7 @@ export default function App() {
               </div>
               <StreakGrid streaks={streaks} />
 
-              {/* Wins log (ADHD: dopamine before verdict) */}
+              {/* Wins log */}
               <div style={{
                 background: C.bg2,
                 border: `1px solid ${winItems.length > 0 ? C.greenBorder : C.border}`,

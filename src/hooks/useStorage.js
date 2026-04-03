@@ -9,6 +9,7 @@
 //   rl:sessions   → [{ type, mins, completedAt, taskName }]
 //   rl:callcount  → N
 //   rl:wins       → { [dateStr]: { rec, gym, prep } }
+//   rl:mitdone    → { [dateStr]: bool }   ← NEW
 // ============================================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -35,20 +36,22 @@ export function getTodayStr() {
 
 export function useStorage() {
   const [streaks,   setStreaks]   = useState({ rec: 0, gym: 0, mit: 0 });
-  const [tasks,     setTasks]     = useState(null);   // AI-sorted task data for today
-  const [blocks,    setBlocks]    = useState({});      // checked blocks by date
-  const [sessions,  setSessions]  = useState([]);      // completed pomodoro sessions
+  const [tasks,     setTasks]     = useState(null);
+  const [blocks,    setBlocks]    = useState({});
+  const [sessions,  setSessions]  = useState([]);
   const [callCount, setCallCount] = useState(0);
   const [wins,      setWins]      = useState({});
+  const [mitDoneMap, setMitDoneMap] = useState({});  // NEW
   const [loaded,    setLoaded]    = useState(false);
 
   useEffect(() => {
-    setStreaks(  load('streaks')   || { rec: 0, gym: 0, mit: 0 });
-    setTasks(    load('tasks')     || null);
-    setBlocks(   load('blocks')    || {});
-    setSessions( load('sessions')  || []);
-    setCallCount(load('callcount') || 0);
-    setWins(     load('wins')      || {});
+    setStreaks(    load('streaks')   || { rec: 0, gym: 0, mit: 0 });
+    setTasks(      load('tasks')     || null);
+    setBlocks(     load('blocks')    || {});
+    setSessions(   load('sessions')  || []);
+    setCallCount(  load('callcount') || 0);
+    setWins(       load('wins')      || {});
+    setMitDoneMap( load('mitdone')   || {});  // NEW
     setLoaded(true);
   }, []);
 
@@ -58,6 +61,21 @@ export function useStorage() {
     setTasks(withDate);
     save('tasks', withDate);
   }, []);
+
+  // ── MIT done toggle ───────────────────────────────────────  NEW
+  const toggleMIT = useCallback(() => {
+    const today = getTodayStr();
+    setMitDoneMap(prev => {
+      const wasD = !!prev[today];
+      const next = { ...prev, [today]: !wasD };
+      save('mitdone', next);
+      return next;
+    });
+  }, []);
+
+  const isMITDone = useCallback(() => {
+    return !!mitDoneMap[getTodayStr()];
+  }, [mitDoneMap]);
 
   // ── Block check/uncheck ───────────────────────────────────
   const toggleBlock = useCallback((blockId, dateStr = null) => {
@@ -76,13 +94,11 @@ export function useStorage() {
   }, [blocks]);
 
   // ── Streaks — idempotent per day ──────────────────────────
-  // bumpStreak: increments only if not already done today
-  // dropStreak: decrements only if was done today (for untick)
   const bumpStreak = useCallback((type) => {
     const today = getTodayStr();
     const lastKey = `last${type.charAt(0).toUpperCase() + type.slice(1)}Date`;
     setStreaks(prev => {
-      if (prev[lastKey] === today) return prev; // already counted today
+      if (prev[lastKey] === today) return prev;
       const next = { ...prev, [type]: (prev[type] || 0) + 1, [lastKey]: today };
       save('streaks', next);
       return next;
@@ -93,7 +109,7 @@ export function useStorage() {
     const today = getTodayStr();
     const lastKey = `last${type.charAt(0).toUpperCase() + type.slice(1)}Date`;
     setStreaks(prev => {
-      if (prev[lastKey] !== today) return prev; // wasn't counted today, nothing to drop
+      if (prev[lastKey] !== today) return prev;
       const next = { ...prev, [type]: Math.max(0, (prev[type] || 0) - 1), [lastKey]: null };
       save('streaks', next);
       return next;
@@ -102,7 +118,6 @@ export function useStorage() {
 
   // ── Wins log ──────────────────────────────────────────────
   const markWin = useCallback((winType) => {
-    // winType: 'rec' | 'gym' | 'prep'
     const today = getTodayStr();
     setWins(prev => {
       const next = { ...prev, [today]: { ...(prev[today] || {}), [winType]: true } };
@@ -119,14 +134,13 @@ export function useStorage() {
   const addSession = useCallback((sessionData) => {
     setSessions(prev => {
       const next = [...prev, { ...sessionData, completedAt: new Date().toISOString() }];
-      // Keep last 100 sessions
       const trimmed = next.slice(-100);
       save('sessions', trimmed);
       return trimmed;
     });
   }, []);
 
-  // ── Call counter (for cost transparency) ─────────────────
+  // ── Call counter ──────────────────────────────────────────
   const bumpCallCount = useCallback(() => {
     setCallCount(prev => {
       const next = prev + 1;
@@ -135,7 +149,6 @@ export function useStorage() {
     });
   }, []);
 
-  // Estimated cost: Claude Haiku ~$0.0028/call → ~₹0.24/call
   const estimatedCostRs = (callCount * 0.24).toFixed(2);
 
   return {
@@ -147,6 +160,8 @@ export function useStorage() {
     callCount,
     estimatedCostRs,
     wins: getTodayWins(),
+    mitDone: isMITDone(),   // NEW — boolean for today
+    toggleMIT,              // NEW — call to tick/untick
     saveTasks,
     toggleBlock,
     isBlockDone,

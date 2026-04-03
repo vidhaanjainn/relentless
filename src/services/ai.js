@@ -23,18 +23,14 @@ const KEY  = process.env.REACT_APP_CLAUDE_KEY || '';
 
 // ── Provider endpoints ────────────────────────────────────────
 async function callClaude(userMsg) {
-  // KEY is baked in at npm start time from .env.local
-  // If empty: stop npm start, verify .env.local has REACT_APP_CLAUDE_KEY, restart npm start
-  if (!KEY) throw new Error('NO_KEY');
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  // Calls our Vercel serverless proxy at /api/chat
+  // The proxy holds the key server-side — key never exposed in browser
+  // Fixes CORS: browsers can't call api.anthropic.com directly from deployed apps
+  const res = await fetch('/api/chat', {
     method:  'POST',
-    headers: {
-      'Content-Type':      'application/json',
-      'x-api-key':         KEY,  // from .env.local only
-      'anthropic-version': '2023-06-01',
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model:      'claude-haiku-4-5-20251001', // cheapest capable model
+      model:      'claude-haiku-4-5-20251001',
       max_tokens: 800,
       system:     CLAUDE_SYSTEM_PROMPT,
       messages:   [{ role: 'user', content: userMsg }],
@@ -42,10 +38,11 @@ async function callClaude(userMsg) {
   });
   if (!res.ok) {
     const e = await res.json().catch(() => ({}));
-    const msg = e.error?.message || `Claude API error ${res.status}`;
-    // 401 = bad key, 429 = rate limit
-    if (res.status === 401) throw new Error('Invalid API key — check REACT_APP_CLAUDE_KEY in .env.local');
-    throw new Error(msg);
+    if (res.status === 500 && e.error?.includes('not configured')) {
+      throw new Error('NO_KEY');
+    }
+    if (res.status === 401) throw new Error('Invalid API key — check Vercel Environment Variables');
+    throw new Error(e.error?.message || `API error ${res.status}`);
   }
   const d = await res.json();
   return d.content?.[0]?.text || '';

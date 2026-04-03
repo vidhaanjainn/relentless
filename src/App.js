@@ -1,34 +1,26 @@
 // ============================================================
-// App.js — Root component. Same architecture as vidhaan-gym:
-// single file manages tabs + global state, passes down to views.
+// App.js — Root component.
 // ============================================================
 
 import { useState, useEffect, useCallback } from 'react';
 import { C, FONTS } from './config/theme';
-import { WEEK_SCHEDULE, MINDSET_SHEETS } from './data/schedule';
+import { WEEK_SCHEDULE } from './data/schedule';
 import { useStorage, getTodayStr } from './hooks/useStorage';
 
-import DayBar          from './components/DayBar';
-import MITCard         from './components/MITCard';
-import ScheduleBlocks  from './components/ScheduleBlocks';
-import StreakGrid       from './components/StreakGrid';
-import FocusView       from './components/FocusView';
-import DumpView        from './components/DumpView';
-import WeekView        from './components/WeekView';
-import SettingsView    from './components/SettingsView';
-import MindsetSheet    from './components/MindsetSheet';
+import DayBar         from './components/DayBar';
+import MITCard        from './components/MITCard';
+import ScheduleBlocks from './components/ScheduleBlocks';
+import StreakGrid      from './components/StreakGrid';
+import FocusView      from './components/FocusView';
+import DumpView       from './components/DumpView';
+import WeekView       from './components/WeekView';
+import SettingsView   from './components/SettingsView';
+import MindsetSheet   from './components/MindsetSheet';
 
-// ── Helpers ───────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────
 function getTodayDayIndex() {
   const d = new Date().getDay();
-  return d === 0 ? 6 : d - 1; // Mon=0 … Sun=6
-}
-
-// Haptic feedback — works on iOS Safari + Android Chrome
-function haptic(type = 'light') {
-  if (!navigator.vibrate) return;
-  const patterns = { light: [10], medium: [20], success: [10, 50, 20], error: [30, 30, 30] };
-  navigator.vibrate(patterns[type] || patterns.light);
+  return d === 0 ? 6 : d - 1;
 }
 
 function getGreeting() {
@@ -40,7 +32,7 @@ function getDateLabel() {
   return new Date().toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
 }
 
-// ── Burst animation (green flash on completion) ───────────────
+// ── Burst overlay ────────────────────────────────────────────
 function BurstOverlay({ show }) {
   if (!show) return null;
   return (
@@ -55,33 +47,32 @@ function BurstOverlay({ show }) {
   );
 }
 
-// ── Toast ─────────────────────────────────────────────────────
+// ── Toast ────────────────────────────────────────────────────
 function Toast({ msg, ok }) {
   if (!msg) return null;
   return (
     <div style={{
-      position:  'fixed', bottom: 84, left: '50%',
+      position: 'fixed', bottom: 84, left: '50%',
       transform: 'translateX(-50%)',
       background: C.bg3,
-      border:    `1px solid ${ok ? C.greenBorder : C.border2}`,
-      borderRadius: 9,
-      padding:   '10px 18px',
-      fontSize:  12, color: ok ? C.green : C.text,
-      zIndex:    998, whiteSpace: 'nowrap',
+      border: `1px solid ${ok ? C.greenBorder : C.border2}`,
+      borderRadius: 9, padding: '10px 18px',
+      fontSize: 12, color: ok ? C.green : C.text,
+      zIndex: 998, whiteSpace: 'nowrap',
       animation: 'rl-fadein 0.28s ease',
-      maxWidth:  '88vw', textAlign: 'center',
+      maxWidth: '88vw', textAlign: 'center',
     }}>
       {msg}
     </div>
   );
 }
 
-// ── Bottom Nav ────────────────────────────────────────────────
+// ── Bottom Nav ───────────────────────────────────────────────
 const TABS = [
-  { id: 'home',     icon: '◈', label: 'Today'  },
-  { id: 'focus',    icon: '◎', label: 'Focus'  },
-  { id: 'dump',     icon: '⊕', label: 'Dump'   },
-  { id: 'week',     icon: '▦', label: 'Week'   },
+  { id: 'home',  icon: '◈', label: 'Today' },
+  { id: 'focus', icon: '◎', label: 'Focus' },
+  { id: 'dump',  icon: '⊕', label: 'Dump'  },
+  { id: 'week',  icon: '▦', label: 'Week'  },
 ];
 
 function BottomNav({ active, onChange }) {
@@ -89,11 +80,9 @@ function BottomNav({ active, onChange }) {
     <div style={{
       position: 'fixed', bottom: 0, left: 0, right: 0,
       background: 'rgba(8,8,9,0.96)',
-      backdropFilter: 'blur(28px)',
-      WebkitBackdropFilter: 'blur(28px)',
+      backdropFilter: 'blur(28px)', WebkitBackdropFilter: 'blur(28px)',
       borderTop: `1px solid ${C.border}`,
-      display: 'flex', padding: '10px 0 24px',
-      zIndex: 100,
+      display: 'flex', padding: '10px 0 24px', zIndex: 100,
     }}>
       {TABS.map(t => (
         <div
@@ -124,60 +113,67 @@ export default function App() {
   const {
     loaded,
     streaks,
-    tasks,
+    tasks,                   // today's AI tasks
+    getTasksForDate,
+    saveTasksForDate,
+    manualTasks,
+    addManualTask,
+    removeManualTask,
+    getManualTasksForDate,
     blocks,
-    callCount,
-    estimatedCostRs,
-    wins,
-    mitDone,        // ← NEW
-    toggleMIT,      // ← NEW
-    saveTasks,
     toggleBlock,
     isBlockDone,
+    sessions,
+    addSession,
     bumpStreak,
     dropStreak,
+    wins,
     markWin,
-    addSession,
+    unmarkWin,
+    mitDone,
+    toggleMIT,
+    callCount,
+    estimatedCostRs,
     bumpCallCount,
   } = useStorage();
 
-  const [tab,         setTab]         = useState('home');
-  const [sheet,       setSheet]       = useState(null);
-  const [burst,       setBurst]       = useState(false);
-  const [toast,       setToast]       = useState({ msg: '', ok: false });
+  const [tab,          setTab]          = useState('home');
+  const [sheet,        setSheet]        = useState(null);
+  const [burst,        setBurst]        = useState(false);
+  const [toast,        setToast]        = useState({ msg: '', ok: false });
   const [showSettings, setShowSettings] = useState(false);
 
   const todayIdx   = getTodayDayIndex();
   const todayDay   = WEEK_SCHEDULE[todayIdx];
-  const mitText    = tasks?.mit        || todayDay?.mit        || 'Record one reel today';
-  const microStart = tasks?.micro_start || todayDay?.microStart || 'Open the doc and start';
+  const mitText    = tasks?.mit         || todayDay?.mit         || 'Record one reel today';
+  const microStart = tasks?.micro_start || todayDay?.microStart  || 'Open the doc and start';
 
-  // ── Toast helper ────────────────────────────────────────────
+  // ── Toast ────────────────────────────────────────────────────
   const showToast = useCallback((msg, ok = false) => {
     setToast({ msg, ok });
     setTimeout(() => setToast({ msg: '', ok: false }), 3200);
   }, []);
 
-  // ── Haptic feedback (iOS/Android vibration API) ─────────────
+  // ── Haptic ───────────────────────────────────────────────────
   const haptic = useCallback((pattern = [10]) => {
     try { navigator.vibrate?.(pattern); } catch(e) {}
   }, []);
 
-  // ── Burst + haptic on completion ─────────────────────────────
+  // ── Celebrate ────────────────────────────────────────────────
   const celebrate = useCallback(() => {
     setBurst(true);
     setTimeout(() => setBurst(false), 500);
     haptic([10, 50, 10]);
   }, [haptic]);
 
-  // ── MIT tick ─────────────────────────────────────────────────
+  // ── MIT toggle ───────────────────────────────────────────────
   const handleToggleMIT = useCallback(() => {
     const nowDone = !mitDone;
     toggleMIT();
     if (nowDone) {
       celebrate();
       bumpStreak('mit');
-      showToast('MIT done. That\'s the one that matters. ✦', true);
+      showToast("MIT done. That's the one that matters. ✦", true);
     } else {
       dropStreak('mit');
     }
@@ -189,21 +185,13 @@ export default function App() {
     toggleBlock(blockId);
     if (nowDone) {
       celebrate();
-      if (streakType === 'rec') {
-        bumpStreak('rec');
-        markWin('rec');
-        showToast('Recording logged 🎬', true);
-      }
-      if (streakType === 'gym') {
-        bumpStreak('gym');
-        markWin('gym');
-        showToast('Gym logged 💪', true);
-      }
+      if (streakType === 'rec') { bumpStreak('rec'); markWin('rec'); showToast('Recording logged 🎬', true); }
+      if (streakType === 'gym') { bumpStreak('gym'); markWin('gym'); showToast('Gym logged 💪', true); }
     } else {
-      if (streakType === 'rec') dropStreak('rec');
-      if (streakType === 'gym') dropStreak('gym');
+      if (streakType === 'rec') { dropStreak('rec'); unmarkWin('rec'); }
+      if (streakType === 'gym') { dropStreak('gym'); unmarkWin('gym'); }
     }
-  }, [isBlockDone, toggleBlock, celebrate, bumpStreak, dropStreak, markWin, showToast, streaks]);
+  }, [isBlockDone, toggleBlock, celebrate, bumpStreak, dropStreak, markWin, unmarkWin, showToast]);
 
   // ── Session complete ─────────────────────────────────────────
   const handleSessionComplete = useCallback((sessionData) => {
@@ -212,14 +200,13 @@ export default function App() {
     showToast('Session complete 🎯 Take a break.', true);
   }, [addSession, celebrate, showToast]);
 
-  // ── Scheduled pressure checks ────────────────────────────────
+  // ── Scheduled nudges ─────────────────────────────────────────
   useEffect(() => {
     const now = new Date();
-    const h = now.getHours();
-    const m = now.getMinutes();
+    const h = now.getHours(), m = now.getMinutes();
     if (h === 14 && m >= 30 && m < 35) showToast('Camera setup time. 3 PM window opens in 30 min.');
     if (h === 16 && m >= 50 && m < 55) setSheet('gym');
-    if (h === 21 && m >= 0  && m < 5)  showToast('Night dump time. What needs to happen tomorrow?');
+    if (h === 21 && m >= 0  && m < 5 ) showToast('Night dump time. What needs to happen tomorrow?');
     if (h === 22 && m >= 30 && m < 35) showToast('Still no dump. Quick — what needs to happen tomorrow?');
   }, []); // eslint-disable-line
 
@@ -237,29 +224,24 @@ export default function App() {
     );
   }
 
-  // ── Wins log ─────────────────────────────────────────────────
+  // ── Wins ─────────────────────────────────────────────────────
   const winItems = [
     wins.prep && 'Script prepared',
     wins.rec  && 'Reel recorded',
     wins.gym  && 'Gym done',
-    mitDone   && 'MIT completed ✦',   // ← NEW
+    mitDone   && 'MIT completed ✦',
   ].filter(Boolean);
 
-  // ═══════════════════════════════
+  // ═══════════════════════════
   // RENDER
-  // ═══════════════════════════════
+  // ═══════════════════════════
   return (
     <div style={{
-      background:  C.bg,
-      height:      '100dvh',
-      fontFamily:  FONTS.body,
-      color:       C.text,
-      maxWidth:    480,
-      margin:      '0 auto',
-      display:     'flex',
-      flexDirection: 'column',
-      overflow:    'hidden',
-      position:    'relative',
+      background: C.bg, height: '100dvh',
+      fontFamily: FONTS.body, color: C.text,
+      maxWidth: 480, margin: '0 auto',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden', position: 'relative',
     }}>
       <style>{`
         @keyframes rl-pulse   { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.75)} }
@@ -273,7 +255,7 @@ export default function App() {
         input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; }
       `}</style>
 
-      {/* ── SETTINGS (full-screen overlay) ── */}
+      {/* ── SETTINGS ── */}
       {showSettings && (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: C.bg }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px 0', flexShrink: 0 }}>
@@ -281,9 +263,7 @@ export default function App() {
             <div
               onClick={() => setShowSettings(false)}
               style={{ width: 33, height: 33, borderRadius: '50%', background: C.bg3, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, color: C.text2 }}
-            >
-              ✕
-            </div>
+            >✕</div>
           </div>
           <SettingsView callCount={callCount} estimatedCostRs={estimatedCostRs} />
         </div>
@@ -301,19 +281,16 @@ export default function App() {
               <div
                 onClick={() => setShowSettings(true)}
                 style={{ width: 33, height: 33, borderRadius: '50%', background: C.bg3, border: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, color: C.text2 }}
-              >
-                ⚙
-              </div>
+              >⚙</div>
             </div>
           </div>
 
-          {/* ── DAY BAR (ADHD time blindness) ── */}
+          {/* ── DAY BAR ── */}
           <DayBar />
 
-          {/* ══ HOME TAB ══ */}
+          {/* ══ HOME ══ */}
           {tab === 'home' && (
             <div style={{ flex: 1, overflowY: 'auto', padding: '18px 18px 90px', scrollbarWidth: 'none' }}>
-              {/* Greeting */}
               <div style={{ fontSize: 10, color: C.text3, letterSpacing: '0.10em', textTransform: 'uppercase', marginBottom: 4, fontWeight: 300 }}>
                 {getGreeting()}
               </div>
@@ -324,7 +301,6 @@ export default function App() {
                 </span>
               </div>
 
-              {/* MIT Card */}
               <MITCard
                 tasks={tasks}
                 microStart={microStart}
@@ -334,7 +310,7 @@ export default function App() {
                 onToggleMIT={handleToggleMIT}
               />
 
-              {/* Mindset preview */}
+              {/* Mindset */}
               <div
                 onClick={() => setSheet('energy')}
                 style={{
@@ -352,7 +328,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Schedule blocks */}
+              {/* Today's blocks */}
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                 <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '.09em', textTransform: 'uppercase', color: C.text3 }}>
                   Today's blocks
@@ -373,7 +349,7 @@ export default function App() {
               </div>
               <StreakGrid streaks={streaks} />
 
-              {/* Wins log */}
+              {/* Wins */}
               <div style={{
                 background: C.bg2,
                 border: `1px solid ${winItems.length > 0 ? C.greenBorder : C.border}`,
@@ -394,7 +370,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ══ FOCUS TAB ══ */}
+          {/* ══ FOCUS ══ */}
           {tab === 'focus' && (
             <FocusView
               mitText={mitText}
@@ -403,26 +379,30 @@ export default function App() {
             />
           )}
 
-          {/* ══ DUMP TAB ══ */}
+          {/* ══ DUMP ══ */}
           {tab === 'dump' && (
             <DumpView
-              onSaveTasks={saveTasks}
+              saveTasksForDate={saveTasksForDate}
+              getManualTasksForDate={getManualTasksForDate}
+              addManualTask={addManualTask}
+              removeManualTask={removeManualTask}
               bumpCallCount={bumpCallCount}
             />
           )}
 
-          {/* ══ WEEK TAB ══ */}
-          {tab === 'week' && <WeekView />}
+          {/* ══ WEEK ══ */}
+          {tab === 'week' && (
+            <WeekView
+              getTasksForDate={getTasksForDate}
+              getManualTasksForDate={getManualTasksForDate}
+            />
+          )}
 
-          {/* ── BOTTOM NAV ── */}
           <BottomNav active={tab} onChange={setTab} />
         </>
       )}
 
-      {/* ── MINDSET SHEET ── */}
       <MindsetSheet type={sheet} onClose={() => setSheet(null)} />
-
-      {/* ── ANIMATIONS ── */}
       <BurstOverlay show={burst} />
       <Toast msg={toast.msg} ok={toast.ok} />
     </div>

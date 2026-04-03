@@ -1,15 +1,15 @@
 // ============================================================
 // useStorage.js — All data persistence lives here.
-// Same pattern as vidhaan-gym. Swap point for Supabase later.
 //
 // Keys (prefix "rl:"):
-//   rl:streaks    → { rec: N, gym: N, mit: N, lastRecDate, lastGymDate }
-//   rl:tasks      → { mit, microStart, tasks[], parked[], note, date }
-//   rl:blocks     → { [dateStr]: { [blockId]: bool } }
-//   rl:sessions   → [{ type, mins, completedAt, taskName }]
-//   rl:callcount  → N
-//   rl:wins       → { [dateStr]: { rec, gym, prep } }
-//   rl:mitdone    → { [dateStr]: bool }   ← NEW
+//   rl:streaks     → { rec, gym, mit, lastRecDate, lastGymDate, lastMitDate }
+//   rl:tasks       → { [dateStr]: { mit, micro_start, tasks[], parked[], note } }
+//   rl:manualTasks → { [dateStr]: [{ id, name, energy, mins, why }] }
+//   rl:blocks      → { [dateStr]: { [blockId]: bool } }
+//   rl:sessions    → [{ type, mins, completedAt, taskName }]
+//   rl:callcount   → N
+//   rl:wins        → { [dateStr]: { rec, gym, prep } }
+//   rl:mitdone     → { [dateStr]: bool }
 // ============================================================
 
 import { useState, useEffect, useCallback } from 'react';
@@ -34,50 +34,108 @@ export function getTodayStr() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+export function getDateStr(offsetDays = 0) {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Migrate old flat rl:tasks → new date-keyed format
+function migrateTasks(raw) {
+  if (!raw) return {};
+  // Already new format — keys look like dates
+  const keys = Object.keys(raw);
+  if (keys.length === 0) return {};
+  if (keys[0].match(/^\d{4}-\d{2}-\d{2}$/)) return raw;
+  // Old flat format — migrate to today
+  const { date: _d, ...clean } = raw;
+  return { [getTodayStr()]: clean };
+}
+
 export function useStorage() {
-  const [streaks,   setStreaks]   = useState({ rec: 0, gym: 0, mit: 0 });
-  const [tasks,     setTasks]     = useState(null);
-  const [blocks,    setBlocks]    = useState({});
-  const [sessions,  setSessions]  = useState([]);
-  const [callCount, setCallCount] = useState(0);
-  const [wins,      setWins]      = useState({});
-  const [mitDoneMap, setMitDoneMap] = useState({});  // NEW
-  const [loaded,    setLoaded]    = useState(false);
+  const [streaks,     setStreaks]     = useState({ rec: 0, gym: 0, mit: 0 });
+  const [tasksMap,    setTasksMap]    = useState({});
+  const [manualTasks, setManualTasks] = useState({});
+  const [blocks,      setBlocks]      = useState({});
+  const [sessions,    setSessions]    = useState([]);
+  const [callCount,   setCallCount]   = useState(0);
+  const [wins,        setWins]        = useState({});
+  const [mitDoneMap,  setMitDoneMap]  = useState({});
+  const [loaded,      setLoaded]      = useState(false);
 
   useEffect(() => {
-    setStreaks(    load('streaks')   || { rec: 0, gym: 0, mit: 0 });
-    setTasks(      load('tasks')     || null);
-    setBlocks(     load('blocks')    || {});
-    setSessions(   load('sessions')  || []);
-    setCallCount(  load('callcount') || 0);
-    setWins(       load('wins')      || {});
-    setMitDoneMap( load('mitdone')   || {});  // NEW
+    setStreaks(     load('streaks')     || { rec: 0, gym: 0, mit: 0 });
+    setTasksMap(    migrateTasks(load('tasks')));
+    setManualTasks( load('manualTasks') || {});
+    setBlocks(      load('blocks')      || {});
+    setSessions(    load('sessions')    || []);
+    setCallCount(   load('callcount')   || 0);
+    setWins(        load('wins')        || {});
+    setMitDoneMap(  load('mitdone')     || {});
     setLoaded(true);
   }, []);
 
-  // ── Tasks (AI dump result) ────────────────────────────────
-  const saveTasks = useCallback((data) => {
-    const withDate = { ...data, date: getTodayStr() };
-    setTasks(withDate);
-    save('tasks', withDate);
+  // ── AI Tasks — save for specific date ────────────────────────
+  const saveTasksForDate = useCallback((data, dateStr) => {
+    const target = dateStr || getTodayStr();
+    const { date: _d, ...clean } = data;
+    setTasksMap(prev => {
+      const next = { ...prev, [target]: clean };
+      save('tasks', next);
+      return next;
+    });
   }, []);
 
-  // ── MIT done toggle ───────────────────────────────────────  NEW
+  const getTasksForDate = useCallback((dateStr) => {
+    return tasksMap[dateStr || getTodayStr()] || null;
+  }, [tasksMap]);
+
+  // ── Manual Tasks ─────────────────────────────────────────────
+  const addManualTask = useCallback((task, dateStr) => {
+    const target = dateStr || getTodayStr();
+    const newTask = {
+      id: `mt_${Date.now()}`,
+      name: task.name,
+      energy: task.energy || 'medium',
+      mins: task.mins || null,
+      why: task.why || '',
+    };
+    setManualTasks(prev => {
+      const next = { ...prev, [target]: [...(prev[target] || []), newTask] };
+      save('manualTasks', next);
+      return next;
+    });
+    return newTask;
+  }, []);
+
+  const removeManualTask = useCallback((taskId, dateStr) => {
+    const target = dateStr || getTodayStr();
+    setManualTasks(prev => {
+      const next = { ...prev, [target]: (prev[target] || []).filter(t => t.id !== taskId) };
+      save('manualTasks', next);
+      return next;
+    });
+  }, []);
+
+  const getManualTasksForDate = useCallback((dateStr) => {
+    return manualTasks[dateStr || getTodayStr()] || [];
+  }, [manualTasks]);
+
+  // ── MIT done toggle ───────────────────────────────────────────
   const toggleMIT = useCallback(() => {
     const today = getTodayStr();
     setMitDoneMap(prev => {
-      const wasD = !!prev[today];
-      const next = { ...prev, [today]: !wasD };
+      const next = { ...prev, [today]: !prev[today] };
       save('mitdone', next);
       return next;
     });
   }, []);
 
-  const isMITDone = useCallback(() => {
-    return !!mitDoneMap[getTodayStr()];
+  const isMITDone = useCallback((dateStr) => {
+    return !!mitDoneMap[dateStr || getTodayStr()];
   }, [mitDoneMap]);
 
-  // ── Block check/uncheck ───────────────────────────────────
+  // ── Block check/uncheck ───────────────────────────────────────
   const toggleBlock = useCallback((blockId, dateStr = null) => {
     const target = dateStr || getTodayStr();
     setBlocks(prev => {
@@ -93,7 +151,7 @@ export function useStorage() {
     return !!(blocks[target] || {})[blockId];
   }, [blocks]);
 
-  // ── Streaks — idempotent per day ──────────────────────────
+  // ── Streaks ───────────────────────────────────────────────────
   const bumpStreak = useCallback((type) => {
     const today = getTodayStr();
     const lastKey = `last${type.charAt(0).toUpperCase() + type.slice(1)}Date`;
@@ -116,7 +174,7 @@ export function useStorage() {
     });
   }, []);
 
-  // ── Wins log ──────────────────────────────────────────────
+  // ── Wins ──────────────────────────────────────────────────────
   const markWin = useCallback((winType) => {
     const today = getTodayStr();
     setWins(prev => {
@@ -126,21 +184,31 @@ export function useStorage() {
     });
   }, []);
 
+  const unmarkWin = useCallback((winType) => {
+    const today = getTodayStr();
+    setWins(prev => {
+      const day = { ...(prev[today] || {}) };
+      delete day[winType];
+      const next = { ...prev, [today]: day };
+      save('wins', next);
+      return next;
+    });
+  }, []);
+
   const getTodayWins = useCallback(() => {
     return wins[getTodayStr()] || {};
   }, [wins]);
 
-  // ── Sessions (pomodoro) ───────────────────────────────────
+  // ── Sessions ──────────────────────────────────────────────────
   const addSession = useCallback((sessionData) => {
     setSessions(prev => {
-      const next = [...prev, { ...sessionData, completedAt: new Date().toISOString() }];
-      const trimmed = next.slice(-100);
+      const trimmed = [...prev, { ...sessionData, completedAt: new Date().toISOString() }].slice(-100);
       save('sessions', trimmed);
       return trimmed;
     });
   }, []);
 
-  // ── Call counter ──────────────────────────────────────────
+  // ── Call counter ──────────────────────────────────────────────
   const bumpCallCount = useCallback(() => {
     setCallCount(prev => {
       const next = prev + 1;
@@ -149,26 +217,32 @@ export function useStorage() {
     });
   }, []);
 
-  const estimatedCostRs = (callCount * 0.24).toFixed(2);
-
   return {
     loaded,
     streaks,
-    tasks,
+    tasks: getTasksForDate(getTodayStr()),   // today's AI tasks (convenience)
+    tasksMap,
+    getTasksForDate,
+    saveTasksForDate,
+    manualTasks,
+    addManualTask,
+    removeManualTask,
+    getManualTasksForDate,
     blocks,
-    sessions,
-    callCount,
-    estimatedCostRs,
-    wins: getTodayWins(),
-    mitDone: isMITDone(),   // NEW — boolean for today
-    toggleMIT,              // NEW — call to tick/untick
-    saveTasks,
     toggleBlock,
     isBlockDone,
+    sessions,
+    addSession,
     bumpStreak,
     dropStreak,
+    wins: getTodayWins(),
     markWin,
-    addSession,
+    unmarkWin,
+    mitDone: isMITDone(),
+    isMITDone,
+    toggleMIT,
+    callCount,
+    estimatedCostRs: (callCount * 0.24).toFixed(2),
     bumpCallCount,
   };
 }

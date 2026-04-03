@@ -27,8 +27,7 @@ export default function MITCard({ tasks, microStart: microStartProp, onStartFocu
         position: 'absolute', top: -50, right: -50,
         width: 180, height: 180,
         background: `radial-gradient(circle,${mitDone ? 'rgba(46,255,138,0.06)' : C.tealSoft} 0%,transparent 65%)`,
-        pointerEvents: 'none',
-        transition: 'background 0.3s ease',
+        pointerEvents: 'none', transition: 'background 0.3s ease',
       }} />
 
       {/* Eyebrow + MIT tick */}
@@ -45,7 +44,6 @@ export default function MITCard({ tasks, microStart: microStartProp, onStartFocu
           </span>
         </div>
 
-        {/* MIT tick-off button */}
         <button
           onClick={onToggleMIT}
           style={{
@@ -62,13 +60,12 @@ export default function MITCard({ tasks, microStart: microStartProp, onStartFocu
         </button>
       </div>
 
-      {/* MIT text — strikethrough if done */}
+      {/* MIT text */}
       <div style={{
         fontFamily: FONTS.display, fontSize: 20, fontWeight: 600, lineHeight: 1.25,
         color: mitDone ? C.text3 : C.text,
         textDecoration: mitDone ? 'line-through' : 'none',
-        marginBottom: 12,
-        transition: 'color 0.3s ease',
+        marginBottom: 12, transition: 'color 0.3s ease',
       }}>
         {mit}
       </div>
@@ -101,7 +98,7 @@ export default function MITCard({ tasks, microStart: microStartProp, onStartFocu
         <span style={{ fontSize: 11, color: C.tealDim }}>start here</span>
       </div>
 
-      {/* Primary CTA + Need help toggle */}
+      {/* Primary CTA + Need help */}
       <div style={{ display: 'flex', gap: 8, marginBottom: helpOpen ? 10 : 0 }}>
         <button onClick={onStartFocus} style={{ ...S.btnPrimary, flex: 1 }}>
           Full session →
@@ -119,7 +116,7 @@ export default function MITCard({ tasks, microStart: microStartProp, onStartFocu
         </button>
       </div>
 
-      {/* Collapsed help options — smooth expand */}
+      {/* Collapsed help options */}
       <div style={{
         overflow: 'hidden',
         maxHeight: helpOpen ? 120 : 0,
